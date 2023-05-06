@@ -1,0 +1,17 @@
+[1.002s] Invoking command in '/home/chloe/turtlebot3_ws/src/turtlebot3_controller/build/turtlebot3_controller': PYTHONPATH=/home/chloe/turtlebot3_ws/src/turtlebot3_controller/build/turtlebot3_controller/prefix_override:/home/chloe/turtlebot3_ws/src/turtlebot3_controller/install/turtlebot3_controller/lib/python3.8/site-packages:${PYTHONPATH} /usr/bin/python3 setup.py develop --editable --build-directory /home/chloe/turtlebot3_ws/src/turtlebot3_controller/build/turtlebot3_controller/build --no-deps install_data
+[1.367s] running develop
+[1.560s] running egg_info
+[1.560s] writing turtlebot3_controller.egg-info/PKG-INFO
+[1.561s] writing dependency_links to turtlebot3_controller.egg-info/dependency_links.txt
+[1.561s] writing entry points to turtlebot3_controller.egg-info/entry_points.txt
+[1.561s] writing requirements to turtlebot3_controller.egg-info/requires.txt
+[1.561s] writing top-level names to turtlebot3_controller.egg-info/top_level.txt
+[1.606s] reading manifest file 'turtlebot3_controller.egg-info/SOURCES.txt'
+[1.607s] writing manifest file 'turtlebot3_controller.egg-info/SOURCES.txt'
+[1.653s] running build_ext
+[1.653s] Creating /home/chloe/turtlebot3_ws/src/turtlebot3_controller/install/turtlebot3_controller/lib/python3.8/site-packages/turtlebot3-controller.egg-link (link to .)
+[1.654s] Installing controller script to /home/chloe/turtlebot3_ws/src/turtlebot3_controller/install/turtlebot3_controller/lib/turtlebot3_controller
+[1.654s] 
+[1.654s] Installed /home/chloe/turtlebot3_ws/src/turtlebot3_controller/build/turtlebot3_controller
+[1.654s] running install_data
+[1.710s] Invoked command in '/home/chloe/turtlebot3_ws/src/turtlebot3_controller/build/turtlebot3_controller' returned '0': PYTHONPATH=/home/chloe/turtlebot3_ws/src/turtlebot3_controller/build/turtlebot3_controller/prefix_override:/home/chloe/turtlebot3_ws/src/turtlebot3_controller/install/turtlebot3_controller/lib/python3.8/site-packages:${PYTHONPATH} /usr/bin/python3 setup.py develop --editable --build-directory /home/chloe/turtlebot3_ws/src/turtlebot3_controller/build/turtlebot3_controller/build --no-deps install_data

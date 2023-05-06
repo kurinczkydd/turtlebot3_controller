@@ -1,0 +1,25 @@
+[0.816s] Invoking command in '/home/chloe/turtlebot3_ws/src/turtlebot3_controller/build/turtlebot3_controller': PYTHONPATH=/home/chloe/turtlebot3_ws/src/turtlebot3_controller/build/turtlebot3_controller/prefix_override:/home/chloe/turtlebot3_ws/src/turtlebot3_controller/install/turtlebot3_controller/lib/python3.8/site-packages:${PYTHONPATH} /usr/bin/python3 setup.py develop --editable --build-directory /home/chloe/turtlebot3_ws/src/turtlebot3_controller/build/turtlebot3_controller/build --no-deps install_data
+[1.090s] running develop
+[1.260s] running egg_info
+[1.260s] creating turtlebot3_controller.egg-info
+[1.260s] writing turtlebot3_controller.egg-info/PKG-INFO
+[1.260s] writing dependency_links to turtlebot3_controller.egg-info/dependency_links.txt
+[1.261s] writing entry points to turtlebot3_controller.egg-info/entry_points.txt
+[1.261s] writing requirements to turtlebot3_controller.egg-info/requires.txt
+[1.261s] writing top-level names to turtlebot3_controller.egg-info/top_level.txt
+[1.262s] writing manifest file 'turtlebot3_controller.egg-info/SOURCES.txt'
+[1.295s] reading manifest file 'turtlebot3_controller.egg-info/SOURCES.txt'
+[1.295s] writing manifest file 'turtlebot3_controller.egg-info/SOURCES.txt'
+[1.332s] running build_ext
+[1.332s] Creating /home/chloe/turtlebot3_ws/src/turtlebot3_controller/install/turtlebot3_controller/lib/python3.8/site-packages/site.py
+[1.335s] Creating /home/chloe/turtlebot3_ws/src/turtlebot3_controller/install/turtlebot3_controller/lib/python3.8/site-packages/turtlebot3-controller.egg-link (link to .)
+[1.336s] Installing controller script to /home/chloe/turtlebot3_ws/src/turtlebot3_controller/install/turtlebot3_controller/lib/turtlebot3_controller
+[1.336s] 
+[1.336s] Installed /home/chloe/turtlebot3_ws/src/turtlebot3_controller/build/turtlebot3_controller
+[1.337s] running install_data
+[1.337s] creating /home/chloe/turtlebot3_ws/src/turtlebot3_controller/install/turtlebot3_controller/share/ament_index
+[1.337s] creating /home/chloe/turtlebot3_ws/src/turtlebot3_controller/install/turtlebot3_controller/share/ament_index/resource_index
+[1.337s] creating /home/chloe/turtlebot3_ws/src/turtlebot3_controller/install/turtlebot3_controller/share/ament_index/resource_index/packages
+[1.337s] copying resource/turtlebot3_controller -> /home/chloe/turtlebot3_ws/src/turtlebot3_controller/install/turtlebot3_controller/share/ament_index/resource_index/packages
+[1.337s] copying package.xml -> /home/chloe/turtlebot3_ws/src/turtlebot3_controller/install/turtlebot3_controller/share/turtlebot3_controller
+[1.381s] Invoked command in '/home/chloe/turtlebot3_ws/src/turtlebot3_controller/build/turtlebot3_controller' returned '0': PYTHONPATH=/home/chloe/turtlebot3_ws/src/turtlebot3_controller/build/turtlebot3_controller/prefix_override:/home/chloe/turtlebot3_ws/src/turtlebot3_controller/install/turtlebot3_controller/lib/python3.8/site-packages:${PYTHONPATH} /usr/bin/python3 setup.py develop --editable --build-directory /home/chloe/turtlebot3_ws/src/turtlebot3_controller/build/turtlebot3_controller/build --no-deps install_data
