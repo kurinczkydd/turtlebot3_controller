@@ -37,6 +37,16 @@ class Pos:
     def __str__(self):
         return "x: " + str(self.x) + ", y: " + str(self.y)
 
+class DirLimit:
+    def __init__(self, up,down,left,right):
+        self.up = up
+        self.down = down
+        self.left = left
+        self.right = right
+
+    def __str__(self):
+        return str(self.up) + " " + str(self.down) + " " + str(self.left) + " " + str(self.right)
+
 def heuristic(a, b):
     return abs(a[0] - b[0]) + abs(a[1] - b[1])
 
@@ -46,27 +56,6 @@ def in_bounds(grid, node):
 def is_traversable(grid, node):
     return grid[node[0]][node[1]] in (0, 1)
 
-#def get_neighbors(grid, current, wall_buffer=5):
-#    neighbors = [(current[0] + d[0], current[1] + d[1]) for d in [(0, 1), (1, 0), (0, -1), (-1, 0)]]
-#    valid_neighbors = []
-#    for neighbor in neighbors:
-#        if in_bounds(grid, neighbor) and is_traversable(grid, neighbor):
-#            wall_adjacent = False
-#            for d in [(0, 1), (1, 0), (0, -1), (-1, 0)]:
-#                wall_node = (neighbor[0] + d[0], neighbor[1] + d[1])
-#                if in_bounds(grid, wall_node) and grid[wall_node[0]][wall_node[1]] == 2:
-#                    wall_adjacent = True
-#                    break
-#            if not wall_adjacent or grid[current[0]][current[1]] == 1:
-#                valid_neighbors.append(neighbor)
-#            elif wall_adjacent:
-#                for d in [(0, 1), (1, 0), (0, -1), (-1, 0)]:
-#                    next_node = (neighbor[0] + d[0], neighbor[1] + d[1])
-#                    if in_bounds(grid, next_node) and grid[next_node[0]][next_node[1]] == 1:
-#                        valid_neighbors.append(neighbor)
-#                        break
-#    return valid_neighbors
-
 def get_clearance(grid, node, clearance):
     for i in range(-clearance, clearance + 1):
         for j in range(-clearance, clearance + 1):
@@ -75,7 +64,7 @@ def get_clearance(grid, node, clearance):
                 return False
     return True
 
-def get_neighbors(grid, current, goal, clearance=5):
+def get_neighbors(grid, current, goal, clearance=15):
     neighbors = [(current[0] + d[0], current[1] + d[1]) for d in [(0, 1), (1, 0), (0, -1), (-1, 0)]]
     valid_neighbors = []
     heuristic_value = heuristic(current, goal)
@@ -171,6 +160,7 @@ class LidarSubscriber(Node):
         self.mapSize = (320,320)
         self.mapRes = 50
         self.mapExplored = []
+        self.mapLimits = DirLimit(320,0,320,0)
         self.map = np.zeros(self.mapSize,dtype=int)
 
         self.search_path = None
@@ -223,11 +213,27 @@ class LidarSubscriber(Node):
             if self.position is not None:
                 self.update_slam_map()
 
+            if self.search_path is not None:
+                dirToGoal = self.calculate_angle(self.mapPosition, self.search_path[self.search_next_step])
+
             if self.search_path is None:
                 # Move the robot forward
                 self.cmd_vel.linear.x = 0.5
                 self.cmd_vel_pub.publish(self.cmd_vel)
                 self.get_logger().info('Moving robot forward. Dist = ' + str(front_range) + " , " + str(front_side_range))
+            elif abs(self.orientation.yaw - dirToGoal) > 1.0:
+                print(dirToGoal)
+                self.stop()
+                self.start_turn(dirToGoal)
+            elif heuristic(self.mapPosition, self.search_path[self.search_next_step]) <= 1:
+                self.search_next_step += 1
+                if self.search_next_step >= len(self.search_path):
+                    print("Done astar path")
+            else:
+                self.cmd_vel.linear.x = 0.5
+                self.cmd_vel_pub.publish(self.cmd_vel)
+                self.get_logger().info('Moving robot forward. Dist = ' + str(front_range) + " , " + str(front_side_range))
+
 
     def odometry_callback(self, msg):
         self.position = msg.pose.pose.position
@@ -239,145 +245,65 @@ class LidarSubscriber(Node):
         if abs(self.orientation.pitch) >= 5:
             self.get_logger().info('FALLING OVER!! pitch:' + str(self.orientation.pitch))
 
+    def calculate_angle(self,start, goal):
+        x1,y1 = start[0],start[1]
+        x2,y2 = goal[0],goal[1]
+
+        dx = x2 - x1
+        dy = y2 - y1
+        angle_radians = math.atan2(dy, dx)
+        angle_degrees = math.degrees(angle_radians)
+        return angle_degrees
+
+    def find_largest_block(self):
+        rows = len(self.map)
+        cols = len(self.map[0])
+        visited = [[False for _ in range(cols)] for _ in range(rows)]
+        max_count = 0
+        start_pos = None
+
+        border = 10
+
+        for i in range(self.mapLimits.up + border, self.mapLimits.down + 1 - border):
+            for j in range(self.mapLimits.left + border, self.mapLimits.right + 1 - border):
+                if self.map[i][j] == 0 and not visited[i][j]:
+                    count = 0
+                    stack = [(i, j)]  # Using a stack to simulate recursion
+
+                    while stack:
+                        x, y = stack.pop()
+                        if not visited[x][y] and self.map[x][y] == 0:
+                            visited[x][y] = True
+                            count += 1
+
+                            # Add neighboring undiscovered zeros to the stack
+                            if x + 1 < self.mapLimits.down - border and self.map[x+1][y] == 0:
+                                stack.append((x + 1, y))  # Down
+                            if x - 1 >= self.mapLimits.up + border and self.map[x-1][y] == 0:
+                                stack.append((x - 1, y))  # Up
+                            if y + 1 < self.mapLimits.left - border and self.map[x][y+1] == 0:
+                                stack.append((x, y + 1))  # Right
+                            if y - 1 >= self.mapLimits.right + border and self.map[x][y-1] == 0:
+                                stack.append((x, y - 1))  # Left
+
+                    if count > max_count:
+                        max_count = count
+                        start_pos = (i, j)
+
+        return (start_pos[0],start_pos[1])
+
     def search_for_unexplored(self):
         self.stop()
-        #print("Snake traversing")
-        #found_goals = 0
-        #self.search_goal = self.snail_traversal(self.mapPosition, min(self.mapSize), found_goals)
-        #found_goals += 1
-        #print("New goal: ", self.search_goal)
-        #print("Searching path")
-        #self.search_path = self.a_star(self.mapPosition, self.search_goal)
-        #while self.search_path is None:
-        #    self.search_goal = self.snail_traversal(self.mapPosition, min(self.mapSize), found_goals)
-        #    found_goals += 1
-        #    print("New goal: ", self.search_goal, found_goals)
-        #    self.search_path = self.a_star(self.mapPosition, self.search_goal)
-        print("Snake traversing")
-        search_goals = self.snail_traversal(self.mapPosition, min(self.mapSize))
-        print("Current goal: ", search_goals[0], 0, "/",len(search_goals))
-        #self.search_path = a_star(self.map, self.mapPosition, search_goals[0])
-        i = 20
-        while self.search_path is None and i < len(search_goals):
-            print("Current goal: ", search_goals[i], i,"/",len(search_goals))
-            self.search_path = a_star(self.map, self.mapPosition, search_goals[i])
-            i += 1
+        goal = self.find_largest_block()
 
-        if i == len(search_goals):
-            print("Failed to find a route")
-            input()
-        else:
-            self.search_next_step = 0
+        print("AStar for", goal)
+        self.search_path = a_star(self.map, self.mapPosition, goal)
+        self.search_next_step = 5
 
-            with open("path.txt","w") as file:
-                for step in self.search_path:
-                    file.write(str(step[0]) + " " + str(step[1]) + "\n")
-            print("Done saving")
-            input()
-
-    def snail_traversal(self, pos, radius):
-        def in_bounds(x, y, grid):
-            return 0 <= x < len(grid) and 0 <= y < len(grid[0])
-
-        def next_direction(direction):
-            return (direction + 1) % 4
-
-        def move_position(x, y, direction):
-            if direction == 0:
-                return x, y - 1  # Move up
-            elif direction == 1:
-                return x + 1, y  # Move right
-            elif direction == 2:
-                return x, y + 1  # Move down
-            elif direction == 3:
-                return x - 1, y  # Move left
-
-        found = []
-        x,y = pos
-        direction = 0
-        steps_taken_in_current_direction = 0
-        steps_to_take_in_current_direction = 1
-        total_steps_taken = 0
-
-        while total_steps_taken < (radius * 2 + 1) ** 2:
-            if in_bounds(x, y, self.map):
-                if self.map[x][y] == 0:
-                    found.append((x,y))
-
-            x, y = move_position(x, y, direction)
-            steps_taken_in_current_direction += 1
-            total_steps_taken += 1
-
-            if steps_taken_in_current_direction == steps_to_take_in_current_direction:
-                direction = next_direction(direction)
-                steps_taken_in_current_direction = 0
-
-                if direction == 1 or direction == 3:  # When changing to horizontal direction
-                    steps_to_take_in_current_direction += 1
-        return found
-
-
-    #def a_star_is_valid_position(self, grid, x, y, clearance=1):
-    #    height = len(grid)
-    #    width = len(grid[0])
-    #
-    #    if x < clearance or x >= width - clearance or y < clearance or y >= height - clearance:
-    #        return False
-    #
-    #    for i in range(-clearance, clearance + 1):
-    #        for j in range(-clearance, clearance + 1):
-    #            if grid[y + i][x + j] == 2:
-    #                return False
-    #
-    #    return True
-    #
-    #def a_star_heuristic(self, a, b):
-    #    return abs(a.x - b.x) + abs(a.y - b.y)
-    #
-    #def a_star(self, start, end):
-    #    start_node = AStarNode(*start)
-    #    end_node = AStarNode(*end)
-    #
-    #    open_list = []
-    #    closed_list = []
-    #
-    #    heapq.heappush(open_list, start_node)
-    #
-    #    while open_list:
-    #        if len(open_list) % 100 == 0:
-    #            print(len(open_list))
-    #        current_node = heapq.heappop(open_list)
-    #
-    #        closed_list.append(current_node)
-    #
-    #        if current_node == end_node:
-    #            path = []
-    #            while current_node is not None:
-    #                path.append((current_node.x, current_node.y))
-    #                current_node = current_node.parent
-    #            return path[::-1]
-    #
-    #        neighbors = [
-    #            AStarNode(current_node.x + dx, current_node.y + dy, current_node)
-    #            for dx, dy in ((0, 1), (1, 0), (0, -1), (-1, 0))
-    #        ]
-    #
-    #        for neighbor in neighbors:
-    #            if not self.a_star_is_valid_position(self.map, neighbor.x, neighbor.y) or neighbor in closed_list:
-    #                continue
-    #
-    #            tentative_g = current_node.g + 1
-    #            if neighbor not in open_list:
-    #                heapq.heappush(open_list, neighbor)
-    #            elif tentative_g >= neighbor.g:
-    #                continue
-    #
-    #            neighbor.parent = current_node
-    #            neighbor.g = tentative_g
-    #            neighbor.h = self.a_star_heuristic(neighbor, end_node)
-    #            neighbor.f = neighbor.g + neighbor.h
-    #
-    #    return None
+        with open("path.txt","w") as file:
+            for step in self.search_path:
+                file.write(str(step[0]) + " " + str(step[1]) + "\n")
+        print("Done saving path")
 
     #Bresenham's line algorithm
     def bresenham(self,start,end):
@@ -446,6 +372,16 @@ class LidarSubscriber(Node):
 
             if self.map[nx][ny] == 0:
                 self.map[nx][ny] = 2
+
+                if ny < self.mapLimits.up:
+                    self.mapLimits.up = ny
+                if ny > self.mapLimits.down:
+                    self.mapLimits.down = ny
+                if nx < self.mapLimits.left:
+                    self.mapLimits.left = nx
+                if nx > self.mapLimits.right:
+                    self.mapLimits.right = nx
+
                 positionCount += 1
 
             points = self.bresenham((px,py),(nx,ny))
@@ -474,20 +410,19 @@ class LidarSubscriber(Node):
         #    #self.place_markers(positions)
         print("New markers:",positionCount)
         if positionCount <= 30 and self.search_next_step is None:
-            with open("map.txt","w") as file:
+            with open("/home/chloe/turtlebot3_ws/src/turtlebot3_controller/map.txt","w") as file:
                 a = 3
                 b = 4
-                self.map[57][40],a = a,self.map[57][40]
-                self.map[64][46],b = b,self.map[64][46]
+                #self.map[57][40],a = a,self.map[57][40]
+                #self.map[64][46],b = b,self.map[64][46]
                 for x in range(len(self.map)):
                     for y in range(len(self.map[0])):
                         file.write(str(self.map[x][y]) + " ")
                     file.write("\n")
-                self.map[57][40],a = a,self.map[57][40]
-                self.map[64][46],b = b,self.map[64][46]
-            print("Done saving")
+                #self.map[57][40],a = a,self.map[57][40]
+                #self.map[64][46],b = b,self.map[64][46]
+            print("Done saving map")
             self.search_for_unexplored()
-            input()
 
     def quaternion_to_euler(self, x, y, z, w):
         # Convert the quaternion to Euler angles (roll, pitch, yaw)
@@ -517,6 +452,7 @@ class LidarSubscriber(Node):
 
         if (front_range <= 0.4 or front_side_range <= 0.3 or all_range <= 0.1) and self.start_turn_angle == -1:
             # Stop the robot
+
             self.cmd_vel.linear.x = 0.0
             self.cmd_vel_pub.publish(self.cmd_vel)
             self.stopped = True
@@ -635,111 +571,6 @@ class LidarSubscriber(Node):
         marker_array = MarkerArray()
         marker_array.markers = markers
         self.marker_array_pub.publish(marker_array)
-
-
-def bresenham(start,end):
-    x1, y1 = start
-    x2, y2 = end
-
-    x,y = x1,y1
-    dx = abs(x2 - x1)
-    dy = abs(y2 -y1)
-
-    if dx == 0:
-        return []
-    gradient = dy/float(dx)
-
-    if gradient > 1:
-        dx, dy = dy, dx
-        x, y = y, x
-        x1, y1 = y1, x1
-        x2, y2 = y2, x2
-
-    p = 2*dy - dx
-    # Initialize the plotting points
-    coords = [(x,y)]
-
-    for k in range(2, dx + 2):
-        if p > 0:
-            y = y + 1 if y < y2 else y - 1
-            p = p + 2 * (dy - dx)
-        else:
-            p = p + 2 * dy
-
-        x = x + 1 if x < x2 else x - 1
-
-        coords.append((x,y))
-    return coords
-
-def bresenham2(start,end):
-    x1, y1 = start
-    x2, y2 = end
-
-    dx = abs(x2 - x1)
-    dy = abs(y2 - y1)
-
-    if (dx <= dy):
-        x1,y1 = y1,x2
-        x2,y2 = y2,x2
-        dx,dy = dy,dx
-
-    pk = 2 * dy - dx
-
-    coords = []
-    for i in range(0,dx+1):
-        coords.append((x1,y1))
-
-        if(x1<x2):
-            x1 = x1 + 1
-        else:
-            x1 = x1 - 1
-        if (pk < 0):
-            pk = pk + 2 * dy
-        else:
-            if(y1<y2):
-                y1 = y1 + 1
-            else:
-                y1 = y1 - 1
-
-            pk = pk + 2 * dy - 2 * dx
-    return coords
-
-def bresenham3(start,end):
-
-    x0, y0 = start
-    x1, y1 = end
-    """Yield integer coordinates on the line from (x0, y0) to (x1, y1).
-
-    Input coordinates should be integers.
-
-    The result will contain both the start and the end point.
-    """
-    dx = x1 - x0
-    dy = y1 - y0
-
-    xsign = 1 if dx > 0 else -1
-    ysign = 1 if dy > 0 else -1
-
-    dx = abs(dx)
-    dy = abs(dy)
-
-    if dx > dy:
-        xx, xy, yx, yy = xsign, 0, 0, ysign
-    else:
-        dx, dy = dy, dx
-        xx, xy, yx, yy = 0, ysign, xsign, 0
-
-    D = 2*dy - dx
-    y = 0
-
-    coords = []
-    for x in range(dx + 1):
-        coords.append((( x0 + x*xx + y*yx),( y0 + x*xy + y*yy)))
-        if D >= 0:
-            y += 1
-            D -= 2*dx
-        D += 2*dy
-    return coords
 
 def main(args=None):
     #print("(10,5)" , bresenham3((5,5),(10,5)))
