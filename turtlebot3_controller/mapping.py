@@ -4,9 +4,20 @@ from sensor_msgs.msg import LaserScan
 from nav_msgs.msg import Odometry
 from geometry_msgs.msg import Point
 from std_msgs.msg import Int32MultiArray
+from nav_msgs.msg import OccupancyGrid
+from visualization_msgs.msg import Marker
 
 import math
 import numpy as np
+
+class Euler:
+    def __init__(self, roll, pitch, yaw):
+        self.roll = math.degrees(roll)
+        self.pitch = math.degrees(pitch)
+        self.yaw = math.degrees(yaw)
+
+    def __str__(self):
+        return "roll: " + str(round(self.roll,2)) + ", pitch: " + str(round(self.pitch,2)) + ", yaw: " + str(round(self.yaw,2))
 
 class DirLimit:
     def __init__(self, up,down,left,right):
@@ -36,7 +47,7 @@ class Pos:
 class MappingNode(Node):
 
     def __init__(self):
-        super().__init__('mappingnode')
+        super().__init__('mapping')
 
         #Subscribing to the LIDAR (360 floats)
         self.lidar_sub = self.create_subscription(
@@ -69,6 +80,38 @@ class MappingNode(Node):
         self.mapLimits = DirLimit(320,0,320,0)
         self.map = np.zeros(self.mapSize,dtype=int)
 
+        self.map_occu_pub = self.create_publisher(
+            OccupancyGrid,
+            "/map_occu",
+            10)
+
+        grid_data_np = np.array(self.occu_map_convert())
+        self.occupancy_grid = OccupancyGrid()
+        self.occupancy_grid.header.frame_id = 'map'
+        self.occupancy_grid.info.resolution = 0.022
+        self.occupancy_grid.info.width = grid_data_np.shape[1]
+        self.occupancy_grid.info.height = grid_data_np.shape[0]
+        self.occupancy_grid.info.origin.position.x = 3.4782 #verical, bigger down, smaller up
+        self.occupancy_grid.info.origin.position.y = -3.55 #horizontal, smaller left, bigger right
+        self.occupancy_grid.info.origin.position.z = 0.0
+        rotation_angle_rad = math.radians(90) / 2  # Converting to radians and dividing by 2 for quaternion
+        self.occupancy_grid.info.origin.orientation.x = 0.0
+        self.occupancy_grid.info.origin.orientation.y = 0.0
+        self.occupancy_grid.info.origin.orientation.z = math.sin(rotation_angle_rad)
+        self.occupancy_grid.info.origin.orientation.w = math.cos(rotation_angle_rad)
+        self.occupancy_grid.data = np.ravel(grid_data_np, order='C').tolist()
+        
+        self.map_occu_pub.publish(self.occupancy_grid)
+
+        #Publisher to visualization marker
+        self.marker_pub = self.create_publisher(
+            Marker,
+            '/pos_marker',
+            10)
+        self.pos_marker_id = 0
+        self.marker_id = 0
+        self.clean_timer = self.create_timer(0.1, self.clean_timer_callback)
+
     def lidar_callback(self, msg):
         self.lidar_ranges = msg.ranges
 
@@ -78,12 +121,80 @@ class MappingNode(Node):
             if self.mapUpdated:
                 #publish map and limits
                 msg = Int32MultiArray()
-                msg.data = self.mapLimits.getAsArray() + [item for sublist in self.map for item in sublist]
+                msg.data = self.mapLimits.getAsArray() + [int(item) for sublist in self.map for item in sublist]
                 self.map_pub.publish(msg)
-                self.get_logger().info("Map data published")
+
+                #publish occupancy map
+                grid_data_np = np.array(self.occu_map_convert())
+                self.occupancy_grid.data = np.ravel(grid_data_np, order='C').tolist()
+                self.map_occu_pub.publish(self.occupancy_grid)   
+
+                ##publish mapped cells to rviz2
+                #self.grid_pub.publish(self.grid_cells)                             
+                #self.get_logger().info("Map data published")
+
+    def occu_map_convert(self):
+        new_matrix = [[0] * len(self.map[0]) for _ in range(len(self.map))]  # Create a new matrix with the same dimensions
+
+        for i in range(len(self.map)):
+            for j in range(len(self.map[i])):
+                if self.map[i][j] == 1:
+                    new_matrix[319-i][j] = 50
+                elif self.map[i][j] == 2:
+                    new_matrix[319-i][j] = 100
+                else:
+                    new_matrix[319-i][j] = self.map[i][j]  # Copy unchanged values
+
+        return new_matrix
+    
+    def clean_timer_callback(self):
+        if self.position is not None:
+            self.place_marker()
+    
+    def place_marker(self):
+        marker = Marker()
+        marker.header.frame_id = "map"
+        marker.id = self.pos_marker_id
+        marker.type = Marker.CYLINDER
+        marker.action = Marker.ADD
+        marker.scale.x = 0.4
+        marker.scale.y = 0.4
+        marker.scale.z = 0.1
+        marker.color.a = 0.5
+        marker.color.r = 1.0
+        marker.color.g = 0.0
+        marker.color.b = 0.0
+
+        marker.pose.position = self.position
+        #print(self.position)
+        self.marker_pub.publish(marker)
+
 
     def odometry_callback(self, msg):
         self.position = msg.pose.pose.position
+        quat = msg.pose.pose.orientation
+        self.orientation = self.quaternion_to_euler(quat.x,quat.y,quat.z,quat.w)
+
+    def quaternion_to_euler(self, x, y, z, w):
+        # Convert the quaternion to Euler angles (roll, pitch, yaw)
+        # See https://en.wikipedia.org/wiki/Conversion_between_quaternions_and_Euler_angles#Quaternion_to_Euler_angles_conversion
+        sinr_cosp = 2.0 * (w * x + y * z)
+        cosr_cosp = 1.0 - 2.0 * (x * x + y * y)
+        roll = math.atan2(sinr_cosp, cosr_cosp)
+
+        sinp = 2.0 * (w * y - z * x)
+        if abs(sinp) >= 1:
+            pitch = math.copysign(math.pi / 2, sinp)  # Use 90 degrees if out of range
+        else:
+            pitch = math.asin(sinp)
+
+        siny_cosp = 2.0 * (w * z + x * y)
+        cosy_cosp = 1.0 - 2.0 * (y * y + z * z)
+        yaw = math.atan2(siny_cosp, cosy_cosp)
+        if yaw < 0:
+            yaw += 2 * math.pi
+
+        return Euler(roll, pitch, yaw)
 
     #Bresenham's line algorithm
     def bresenham(self,start,end):
@@ -126,8 +237,8 @@ class MappingNode(Node):
     def update_slam_map(self):
         positionCount = 0
 
-        px = len(self.map)//2 + int(round(self.position.x,5) * self.mapRes)
-        py = len(self.map[0])//2 + int(round(self.position.y,5) * self.mapRes)
+        px = self.mapSize[0]//2 + int(round(self.position.x,5) * self.mapRes)
+        py = self.mapSize[1]//2 + int(round(self.position.y,5) * self.mapRes)
         self.mapPosition = (px,py)
 
         for deg in range(len(self.lidar_ranges)):
@@ -186,7 +297,7 @@ def main(args=None):
     try:
         rclpy.spin(turtlebot)
     except KeyboardInterrupt:
-        turtlebot.stop()
+        pass
 
     turtlebot.destroy_node()
     rclpy.shutdown()

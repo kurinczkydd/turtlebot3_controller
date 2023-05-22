@@ -10,6 +10,8 @@ setup(
         ('share/ament_index/resource_index/packages',
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
+        (f'share/{package_name}/launch', ['launch/turtlebot3_launch.py']),
+        (f'share/{package_name}/launch', ['launch/launch_sim.py']),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
@@ -21,6 +23,9 @@ setup(
     entry_points={
         'console_scripts': [
             'controller = turtlebot3_controller.controller:main',
+            'mapping = turtlebot3_controller.mapping:main',
+            'explore = turtlebot3_controller.explore:main',
+            'path = turtlebot3_controller.path:main',
         ],
     },
 )

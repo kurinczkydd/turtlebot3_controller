@@ -3,9 +3,12 @@ import rclpy
 from rclpy.node import Node
 from std_msgs.msg import Int32MultiArray, Int32
 
+from collections import deque
+from operator import itemgetter
 import math
 import numpy as np
 import time
+import copy
 
 class Pos:
     def __init__(self, x, y):
@@ -30,11 +33,30 @@ class DirLimit:
     
     def getAsArray(self):
         return [self.up, self.down, self.left, self.right]
+    
+def pad_walls(grid, pad_distance):
+    # create a copy of the grid to avoid modifying it while iterating
+    new_grid = copy.deepcopy(grid)
+    
+    # iterate over the cells in the grid
+    for i in range(len(grid)):
+        for j in range(len(grid[i])):
+            # if this cell is a wall
+            if grid[i][j] == 2:
+                # iterate over the neighboring cells within the padding distance
+                for di in range(-pad_distance, pad_distance + 1):
+                    for dj in range(-pad_distance, pad_distance + 1):
+                        # if the neighboring cell is within the grid and not a wall
+                        ni, nj = i + di, j + dj
+                        if (0 <= ni < len(grid)) and (0 <= nj < len(grid[i])) and grid[ni][nj] != 2:
+                            # set it to be a wall
+                            new_grid[ni][nj] = 2
+    return new_grid
 
 class ExploreNode(Node):
 
     def __init__(self):
-        super().__init__('explorenode')
+        super().__init__('explore')
 
         #Subscribing to the map_data
         self.map_data_sub = self.create_subscription(
@@ -67,6 +89,8 @@ class ExploreNode(Node):
             10)
 
         #SLAM map
+        self.mapSize = (320,320)
+        self.mapRes = 50
         self.mapLimits = DirLimit(320,0,320,0)
         self.map = np.zeros(self.mapSize,dtype=int)
 
@@ -84,52 +108,102 @@ class ExploreNode(Node):
 
             time.sleep(1)
 
-            undiscovered = self.find_largest_block()
-            msg = Int32MultiArray()
-            msg.data = undiscovered
-            self.goal_pub.publish(msg)
-            self.get_logger().info("Undiscovered area goal published")
+            #undiscovered = self.find_regions(np.array(self.map))
+            undiscovered = self.find_all_groups(pad_walls(self.map, 6))
+
+            if len(undiscovered) > 0:
+                msg = Int32MultiArray()
+                msg.data = [item for sublist in undiscovered for item in sublist]
+                self.goal_pub.publish(msg)
+                self.get_logger().info("Undiscovered area goals published (" + str(len(undiscovered)) + ")")
+            else:
+                self.get_logger().info("Cannot find any undiscovered area, done")
+                self.turtle_state = 1 #Wait for command
+                stateMsg = Int32()
+                stateMsg.data = 1
+                self.state_pub.publish(stateMsg)
+                with open("/home/chloe/turtlebot3_ws/src/turtlebot3_controller/mapExp.txt","w") as file:
+                    for x in range(len(self.map)):
+                        for y in range(len(self.map[0])):
+                            file.write(str(self.map[x][y]) + " ")
+                        file.write("\n")
+                self.get_logger().info("Done saving map")
 
     def map_data_callback(self, msg):
         self.mapLimits = DirLimit(msg.data[0],msg.data[1],msg.data[2],msg.data[3])
         self.map = [msg.data[i:i+320] for i in range(4, len(msg.data), 320)]
 
-    def find_largest_block(self):
-        rows = len(self.map)
-        cols = len(self.map[0])
+    def find_regions(self, map):
+        height, width = map.shape
+        visited = np.zeros((height, width), dtype=bool)
+        dx = [0, 0, -1, 1]
+        dy = [-1, 1, 0, 0]
+        regions = []
+
+        def is_valid(x, y):
+            return 0 <= x < height and 0 <= y < width
+
+        def bfs(start):
+            queue = deque([start])
+            visited[start[0], start[1]] = True
+            region_size = 0
+            while queue:
+                x, y = queue.popleft()
+                region_size += 1
+                for direction in range(4):
+                    nx, ny = x + dx[direction], y + dy[direction]
+                    if is_valid(nx, ny) and not visited[nx][ny] and map[nx][ny] == 0:
+                        queue.append((nx, ny))
+                        visited[nx, ny] = True
+            return region_size
+
+        for i in range(height):
+            for j in range(width):
+                if map[i][j] == 0 and not visited[i][j]:
+                    regions.append(((i, j), bfs((i, j))))
+                    
+        regions.sort(key=itemgetter(1), reverse=True)
+
+        return [region[0] for region in regions]
+
+    def find_all_groups(self, map):
+        rows = len(map)
+        cols = len(map[0])
         visited = [[False for _ in range(cols)] for _ in range(rows)]
-        max_count = 0
-        start_pos = None
-
+        groups = []
         border = 10
-
+    
         for i in range(self.mapLimits.up + border, self.mapLimits.down + 1 - border):
             for j in range(self.mapLimits.left + border, self.mapLimits.right + 1 - border):
-                if self.map[i][j] == 0 and not visited[i][j]:
+                if map[i][j] == 0 and not visited[i][j]:
                     count = 0
                     stack = [(i, j)]  # Using a stack to simulate recursion
-
+    
                     while stack:
                         x, y = stack.pop()
-                        if not visited[x][y] and self.map[x][y] == 0:
+                        if not visited[x][y] and map[x][y] == 0:
                             visited[x][y] = True
                             count += 1
-
+    
                             # Add neighboring undiscovered zeros to the stack
-                            if x + 1 < self.mapLimits.down - border and self.map[x+1][y] == 0:
+                            if x + 1 < self.mapLimits.down - border and map[x+1][y] == 0:
                                 stack.append((x + 1, y))  # Down
-                            if x - 1 >= self.mapLimits.up + border and self.map[x-1][y] == 0:
+                            if x - 1 >= self.mapLimits.up + border and map[x-1][y] == 0:
                                 stack.append((x - 1, y))  # Up
-                            if y + 1 < self.mapLimits.left - border and self.map[x][y+1] == 0:
+                            if y + 1 < self.mapLimits.right - border and map[x][y+1] == 0:
                                 stack.append((x, y + 1))  # Right
-                            if y - 1 >= self.mapLimits.right + border and self.map[x][y-1] == 0:
+                            if y - 1 >= self.mapLimits.left + border and map[x][y-1] == 0:
                                 stack.append((x, y - 1))  # Left
+    
+                    # We've finished exploring this group, so add the starting position and size to the list
+                    groups.append(([i, j], count))
+    
+        # Sort the groups by size in descending order
+        groups.sort(key=lambda x: x[1], reverse=True)
+    
+        # Return a list of starting positions, in descending order of group size
+        return [group[0] for group in groups]
 
-                    if count > max_count:
-                        max_count = count
-                        start_pos = (i, j)
-
-        return [start_pos[0],start_pos[1]]
 
 def main(args=None):
     rclpy.init(args=args)
@@ -139,7 +213,7 @@ def main(args=None):
     try:
         rclpy.spin(turtlebot)
     except KeyboardInterrupt:
-        turtlebot.stop()
+        pass
 
     turtlebot.destroy_node()
     rclpy.shutdown()
