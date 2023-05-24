@@ -173,6 +173,7 @@ class PathNode(Node):
         # 3 Stop
         # 4 AStar
         # 5 Pathfinding
+        # 6 Sweeping
         
         self.map_data_sub = self.create_subscription(
             Int32MultiArray,
@@ -214,7 +215,44 @@ class PathNode(Node):
         self.mapPosition = (px,py)
 
     def goal_callback(self, msg):
-        if self.turtle_state == 4:
+        if self.turtle_state == 4 and len(msg.data) == 4:
+            #Sweeping pathfinding
+            start = (msg.data[0], msg.data[1])
+            end = (msg.data[2], msg.data[3])
+
+            padded_map = pad_walls(self.map,8)
+            padded_map = np.array(padded_map)
+
+            self.search_path = a_star_search(padded_map, self.mapPosition, goal)
+
+            if self.search_path is None or len(self.search_path) == 0:
+                self.get_logger().info("Failed to find any AStar routes!")
+
+                self.deleteRvizMarkers()
+
+                self.turtle_state = 1 #Wait for command state
+                stateMsg = Int32()
+                stateMsg.data = 1
+                self.state_pub.publish(stateMsg)
+            else:
+                print("PATH: ", self.search_path[0], self.search_path[-1])
+
+                path = [item for sublist in self.search_path for item in sublist]
+
+                self.turtle_state = 6 #Pathfinding state
+                stateMsg = Int32()
+                stateMsg.data = 6
+                self.state_pub.publish(stateMsg)
+
+                time.sleep(1)
+
+                msg = Int32MultiArray()
+                msg.data = path
+                self.path_pub.publish(msg)
+                self.get_logger().info("AStar path published (" + str(len(self.search_path)) + ")")
+
+
+        elif self.turtle_state == 4:
             goals = [msg.data[i:i+2] for i in range(0, len(msg.data), 2)]
 
             padded_map = pad_walls(self.map,10)
@@ -250,7 +288,7 @@ class PathNode(Node):
                 self.state_pub.publish(stateMsg)
             else:
                 print("PATH: ", self.search_path[0], self.search_path[-1])
-                #self.search_path.reverse()
+                
                 path = [item for sublist in self.search_path for item in sublist]
 
                 self.turtle_state = 5 #Pathfinding state

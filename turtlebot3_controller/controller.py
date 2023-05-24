@@ -79,8 +79,9 @@ class ControllerNode(Node):
         # 3 Stop
         # 4 AStar
         # 5 Pathfinding
+        # 6 Sweeping
 
-        self.path_pub = self.create_subscription(
+        self.path_sub = self.create_subscription(
             Int32MultiArray,
             '/path',
             self.path_callback,
@@ -113,7 +114,6 @@ class ControllerNode(Node):
     def path_callback(self, msg):
         self.search_path = [msg.data[i:i+2] for i in range(0, len(msg.data), 2)]
         self.get_logger().info("Got AStar path")
-        self.get_logger().info(str(self.turtle_state))
 
     def next_node_in_path(self, inc):
         self.search_next_step = min(self.search_next_step + inc, len(self.search_path)-1)

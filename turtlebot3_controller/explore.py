@@ -82,6 +82,7 @@ class ExploreNode(Node):
         # 3 Stop
         # 4 AStar
         # 5 Pathfinding
+        # 6 Sweeping
 
         self.goal_pub = self.create_publisher(
             Int32MultiArray,
