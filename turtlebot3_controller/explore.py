@@ -107,28 +107,27 @@ class ExploreNode(Node):
             stateMsg.data = 4
             self.state_pub.publish(stateMsg)
 
-            time.sleep(1)
+            time.sleep(2)
 
             #undiscovered = self.find_regions(np.array(self.map))
             undiscovered = self.find_all_groups(pad_walls(self.map, 6))
 
-            if len(undiscovered) > 0:
+            undiscGood = []
+            for und in undiscovered:
+                if und[1] >= 500:
+                    undiscGood.append(und[0])
+
+            if len(undiscGood) > 0:
                 msg = Int32MultiArray()
-                msg.data = [item for sublist in undiscovered for item in sublist]
+                msg.data = [item for sublist in undiscGood for item in sublist]
                 self.goal_pub.publish(msg)
-                self.get_logger().info("Undiscovered area goals published (" + str(len(undiscovered)) + ")")
+                self.get_logger().info("Undiscovered area goals published (" + str(len(undiscGood)) + ")")
             else:
-                self.get_logger().info("Cannot find any undiscovered area, done")
-                self.turtle_state = 1 #Wait for command
+                self.get_logger().info("Cannot find any undiscovered area, sweeping")
+                self.turtle_state = 6 #Sweep state
                 stateMsg = Int32()
-                stateMsg.data = 1
+                stateMsg.data = 6
                 self.state_pub.publish(stateMsg)
-                with open("/home/chloe/turtlebot3_ws/src/turtlebot3_controller/mapExp.txt","w") as file:
-                    for x in range(len(self.map)):
-                        for y in range(len(self.map[0])):
-                            file.write(str(self.map[x][y]) + " ")
-                        file.write("\n")
-                self.get_logger().info("Done saving map")
 
     def map_data_callback(self, msg):
         self.mapLimits = DirLimit(msg.data[0],msg.data[1],msg.data[2],msg.data[3])
@@ -165,7 +164,7 @@ class ExploreNode(Node):
                     
         regions.sort(key=itemgetter(1), reverse=True)
 
-        return [region[0] for region in regions]
+        return [region for region in regions]
 
     def find_all_groups(self, map):
         rows = len(map)
@@ -203,7 +202,7 @@ class ExploreNode(Node):
         groups.sort(key=lambda x: x[1], reverse=True)
     
         # Return a list of starting positions, in descending order of group size
-        return [group[0] for group in groups]
+        return [group for group in groups]
 
 
 def main(args=None):

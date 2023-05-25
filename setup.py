@@ -26,6 +26,7 @@ setup(
             'mapping = turtlebot3_controller.mapping:main',
             'explore = turtlebot3_controller.explore:main',
             'path = turtlebot3_controller.path:main',
+            'sweep = turtlebot3_controller.sweep:main',
         ],
     },
 )

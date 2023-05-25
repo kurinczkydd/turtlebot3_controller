@@ -57,6 +57,12 @@ def generate_launch_description():
                 executable='path',
                 output='screen',
                 name='pathnode'
+            ),
+            launch_ros.actions.Node(
+                package='turtlebot3_controller',
+                executable='sweep',
+                output='screen',
+                name='sweepnode'
             )
         ]
     )

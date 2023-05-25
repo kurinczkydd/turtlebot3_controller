@@ -112,6 +112,8 @@ class ControllerNode(Node):
             self.get_logger().info('Moving robot forward.')
 
     def path_callback(self, msg):
+
+        self.get_logger().info(str(self.turtle_state))
         self.search_path = [msg.data[i:i+2] for i in range(0, len(msg.data), 2)]
         self.get_logger().info("Got AStar path")
 
@@ -120,7 +122,7 @@ class ControllerNode(Node):
         self.current_distance = self.heuristic(self.mapPosition, self.search_path[self.search_next_step]) 
         self.get_logger().info("Got to the next node " + str(self.search_next_step) + "/" + str(len(self.search_path)))
             
-        if self.search_next_step >= len(self.search_path)-1:
+        if self.search_next_step >= len(self.search_path)-15:
             self.get_logger().info("Got to the AStar path, finding another.")
             self.search_next_step = 5
             self.search_path = None
@@ -138,7 +140,7 @@ class ControllerNode(Node):
             self.check_distance()
         elif self.turtle_state == 5:
             front_range, front_side_range, all_range_min = self.check_distance()
-            if all_range_min < 0.15:
+            if all_range_min < 0.14 and not self.stopped:
                 self.stop()
                 self.get_logger().info("Almost fell over, finding another AStar path.")
                 self.search_next_step = 5
@@ -165,26 +167,49 @@ class ControllerNode(Node):
                 #self.get_logger().info('Moving robot forward. Dist = ' + str(front_range) + " , " + str(front_side_range))
         elif self.turtle_state == 1: # Wait for command
             pass
-        elif self.turtle_state in [2,3,4]: # Get route, Stop, AStar
+        elif self.turtle_state in [2,3,4,6]: # Get route, Stop, AStar, Sweeping
             if not self.stopped:
                 self.stop()
-        elif self.turtle_state == 5 and self.search_path is not None and self.mapPosition is not None: # Pathfinding
-            dirToGoal = self.calculate_angle(self.mapPosition, self.search_path[self.search_next_step])
+        elif self.turtle_state == 5: # Pathfinding
+            if self.search_path is None:
+                self.get_logger().info("search_path is None")
+                return
+            if self.mapPosition is None:
+                self.get_logger().info("mapPosition is None")
+                return
+            
+                
+            if self.search_next_step < len(self.search_path):
+                dirToGoal = self.calculate_angle(self.mapPosition, self.search_path[self.search_next_step])
+                distanceToGoal = self.heuristic(self.mapPosition, self.search_path[self.search_next_step])
+            else:
+                dirToGoal = 20
+                distanceToGoal = 30
             deltaDir = self.calculate_delta_angle(self.orientation.yaw, dirToGoal)
-            distanceToGoal = self.heuristic(self.mapPosition, self.search_path[self.search_next_step])
 
-            if distanceToGoal > self.current_distance:
-                #self.stop()
-                self.next_node_in_path(5)
-            elif abs(deltaDir) > 3.0 and self.start_turn_angle == -1:
-                self.stop()
-                self.start_turn(deltaDir)
-            elif distanceToGoal  <= 3.0:
-                self.next_node_in_path(20)
-            elif self.start_turn_angle == -1:
-                self.cmd_vel.linear.x = 0.3
-                self.cmd_vel_pub.publish(self.cmd_vel)
-                self.get_logger().info('Moving robot forward.')
+            """
+            self.get_logger().info(str(distanceToGoal > self.current_distance) + " " + str(abs(deltaDir) > 3.0 and self.start_turn_angle == -1) \
+                                   + " " + str(distanceToGoal  <= 3.0) + " " + str(self.start_turn_angle))
+            """
+
+            if self.start_turn_angle == -1:
+                if distanceToGoal > self.current_distance:
+                    #self.stop()
+                    self.next_node_in_path(5)
+                elif abs(deltaDir) > 3.0:
+                    self.stop()
+                    self.next_node_in_path(1)
+                    if self.search_path != None:
+                        self.start_turn(deltaDir)
+                elif distanceToGoal  <= 3.0:
+                    self.next_node_in_path(20)
+                #elif self.start_turn_angle != -1:
+                #    self.stop()
+                #    self.start_turn_angle = -1
+                else:
+                    self.cmd_vel.linear.x = 0.3
+                    self.cmd_vel_pub.publish(self.cmd_vel)
+                    self.get_logger().info('Moving robot forward.')
 
 
     def odometry_callback(self, msg):

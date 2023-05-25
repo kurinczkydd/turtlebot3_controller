@@ -2,6 +2,8 @@ import rclpy
 from rclpy.node import Node
 from nav_msgs.msg import Odometry
 from std_msgs.msg import Int32MultiArray, Int32
+from visualization_msgs.msg import Marker
+from geometry_msgs.msg import Point
 
 import copy
 import numpy as np
@@ -9,6 +11,7 @@ from collections import deque
 from operator import itemgetter
 from enum import Enum
 import math
+import datetime
 import time
 
 class Dir(Enum):
@@ -72,10 +75,11 @@ class SweepNode(Node):
         # 4 AStar
         # 5 Pathfinding
         # 6 Sweeping
+        # 7 ToSweep
 
         self.path_sub = self.create_subscription(
             Int32MultiArray,
-            '/path',
+            '/path_sweep',
             self.path_callback,
             10)
         
@@ -83,11 +87,21 @@ class SweepNode(Node):
             Int32MultiArray,
             '/path',
             10)
-
+        
+        self.marker_sweep_pub = self.create_publisher(
+            Marker,
+            '/path_sweep_marker',
+            10)
+        
         self.map_data_sub = self.create_subscription(
             Int32MultiArray,
             '/map_data',
             self.map_data_callback,
+            10)
+        
+        self.goal_pub = self.create_publisher(
+            Int32MultiArray,
+            '/goal_sweep',
             10)
 
         #SLAM map
@@ -101,6 +115,7 @@ class SweepNode(Node):
         self.pathNodeCoords = []
         self.pathNodeCurrent = 0
         self.fullPath = []
+        self.pathConnecting = []
 
     def map_data_callback(self, msg):
         self.mapLimits = DirLimit(msg.data[0],msg.data[1],msg.data[2],msg.data[3])
@@ -113,57 +128,79 @@ class SweepNode(Node):
         self.mapPosition = (px,py)
 
     def path_callback(self, msg):
-        self.fullPath.append([msg.data[i:i+2] for i in range(0, len(msg.data), 2)])
+
+        self.pathConnecting.append([msg.data[i:i+2] for i in range(0, len(msg.data), 2)])
         self.get_logger().info("Got AStar path (" + str(self.pathNodeCurrent+1) + "/" + str(len(self.pathNodeCoords)) + ")")
         self.pathNodeCurrent += 1
         
         if self.pathNodeCurrent < len(self.pathNodeCoords):
             self.sendNextPathPlanToPathNode()
         else:
-            sweepingPath = [item for sublist in self.fullPath for item in sublist]
+            path = []
+            for i in range(len(self.fullPath)):
+                if i < len(self.fullPath):
+                    path.append(self.fullPath[i])
+                if i < len(self.pathConnecting):
+                    path.append(self.pathConnecting[i])
 
-            self.turtle_state = 6 #Pathfinding state
+            sweepingPath = [item for sublist in path for item in sublist]
+            sweepingPathFlat = [item for sublist in sweepingPath for item in sublist]
+
+            self.turtle_state = 5 #Pathfinding state
             stateMsg = Int32()
-            stateMsg.data = 6
+            stateMsg.data = 5
             self.state_pub.publish(stateMsg)
 
-            time.sleep(1)
+            self.place_markers_sweep(sweepingPath)
+
+            time.sleep(2)
 
             msg = Int32MultiArray()
-            msg.data = sweepingPath
+            msg.data = sweepingPathFlat
             self.path_pub.publish(msg)
-            self.get_logger().info("AStar path published (" + str(len(self.search_path)) + ")")
+            self.get_logger().info("AStar path published (" + str(len(sweepingPath)) + ")")
 
 
     def turtle_state_callback(self, msg):
         self.turtle_state = msg.data
 
         if self.turtle_state == 6 and self.map is not None:
+            self.get_logger().info("Sweeping started")
             mapLimits = self.mapLimits.getAsArray()
-            map_data = self.processMapForSweep(self.map, 7, ())
+            map_data = self.processMapForSweep(self.map, 10, mapLimits)
 
+            self.get_logger().info(str(mapLimits[0]) + " " + str(mapLimits[1]) + " " + str(mapLimits[2]) + " " + str(mapLimits[3]))
             bounds = self.getRoomBoundaries(map_data, mapLimits)
+            self.get_logger().info(str(bounds[0]) + " " + str(bounds[1]) + " " + str(bounds[2]) + " " + str(bounds[3]))
             processedMap = self.processMap(map_data, bounds)
 
-            fullPath = [self.getPath(processedMap, self.mapPosition, (self.mapSize[0]-1, self.mapSize[1]-1), bounds)]
+            processedMap, path = self.getPath(processedMap, (self.mapPosition[0],self.mapPosition[1]), (self.mapSize[0]-1, self.mapSize[1]-1), bounds)
+            self.fullPath = [path]
+            self.get_logger().info("Got region 1")
 
             regions = self.find_regions(processedMap, (bounds[0]+5, bounds[1]-5, bounds[2]+5, bounds[3]-5), 0)
             while self.isThereMoreRegions(regions, 1000):
-                fullPath.append(self.getPath(processedMap, regions[0][0], (self.mapSize[0]-1, self.mapSize[1]-1), bounds))
+                self.get_logger().info("Sweeping region " + str(len(self.fullPath)+1))
+                processedMap, path = self.getPath(processedMap, (regions[0][0][0],regions[0][0][1]), (self.mapSize[0]-1, self.mapSize[1]-1), bounds)
+                self.fullPath.append(path)
+                self.get_logger().info("Got region " + str(len(self.fullPath)))
                 regions = self.find_regions(processedMap, (bounds[0]+5, bounds[1]-5, bounds[2]+5, bounds[3]-5), 0)
+                self.get_logger().info("Got next regions " + str(len(self.fullPath)+1))
 
+            self.get_logger().info("Finished sweeping regions, connecting them")
+                
             #got all sweep paths
-            self.getAllCoordsForPathNode(fullPath)
+            self.getAllCoordsForPathNode()
             self.sendNextPathPlanToPathNode()
             
 
     def sendNextPathPlanToPathNode(self):
-        self.turtle_state = 4 #AStar state
+        self.turtle_state = 7 #AStar sweeping state
         stateMsg = Int32()
-        stateMsg.data = 4
+        stateMsg.data = 7
         self.state_pub.publish(stateMsg)
 
-        time.sleep(1)
+        time.sleep(2)
 
         msg = Int32MultiArray()
         coords = self.pathNodeCoords[self.pathNodeCurrent]
@@ -171,16 +208,16 @@ class SweepNode(Node):
         self.goal_pub.publish(msg)
         self.get_logger().info("Sweeping path goal published (" + str(self.pathNodeCurrent+1) + "/" + str(len(self.pathNodeCoords)) + ")")
 
-    def getAllCoordsForPathNode(self, fullPath):
+    def getAllCoordsForPathNode(self):
         self.pathNodeCoords = []
         self.pathNodeCurrent = 0
 
         start = None
         end = self.mapPosition
-        for i in range(1, len(fullPath)):
-            start = fullPath[i][0]
-            self.pathNodeCoords .append([start, end])
-            end = fullPath[i][-1]
+        for i in range(1, len(self.fullPath)):
+            start = self.fullPath[i][0]
+            self.pathNodeCoords.append([start, end])
+            end = self.fullPath[i][-1]
 
     def processMapForSweep(self, grid, pad_distance, mapLimits):
         new_grid = copy.deepcopy(grid)
@@ -273,8 +310,11 @@ class SweepNode(Node):
             for j in range(len(mat[i])):
                 if mat[i][j] == 3:
                     mat[i][j] = 2
+        return mat
 
     def getPath(self, mat, start, goal, bounding, radius = 7):
+        a = datetime.datetime.now()
+
         prevDir = None
         prevLength = 0
 
@@ -292,8 +332,8 @@ class SweepNode(Node):
                 current = self.goPath(current, dir)
 
                 if path.count(current) > 2:
-                    self.resetSweep(mat)
-                    return path[:len(path)-10]
+                    mat = self.resetSweep(mat)
+                    return mat, path[:len(path)-10]
 
                 path.append(current)
                 for i in range(-radius, radius+1):
@@ -308,8 +348,17 @@ class SweepNode(Node):
                 prevDir, dir = self.rotateDir(dir, prevDir)
                 prevLength = 0
 
-        self.resetSweep(mat)
-        return path
+            b = (datetime.datetime.now()-a)
+            if b.seconds > 30:
+                o = "paths: "
+                for p in path:
+                    o += str(p[0]) + " " + str(p[1]) + " -> "
+                self.get_logger().info(o)
+                mat = self.resetSweep(mat)
+                return mat, path
+
+        mat = self.resetSweep(mat)
+        return mat, path
     
     def remove_outliers(self, data, n=2):
         mean = np.mean(data)
@@ -317,7 +366,7 @@ class SweepNode(Node):
         
         return [x for x in data if (x > mean - n * std_dev) and (x < mean + n * std_dev)]
 
-    def getRoomBoundaries(self, mat, mapLimit, freq=10, backUpRange=10, excludeRange = 3):
+    def getRoomBoundaries(self, mat, mapLimit, freq=10, backUpRange=15, excludeRange = -25):
 
         boundaries = []
         #UP
@@ -444,6 +493,36 @@ class SweepNode(Node):
         regions.sort(key=itemgetter(1), reverse=True)
 
         return [region for region in regions]
+    
+
+
+    def place_markers_sweep(self, positions):
+
+        marker = Marker()
+        marker.header.frame_id = "/map"
+        marker.id = 0
+        marker.type = Marker.LINE_STRIP
+        marker.action = Marker.ADD
+
+        # Line strip is blue
+        marker.color.b = 1.0
+        marker.color.a = 1.0
+
+        # Line strip width
+        marker.scale.x = 0.1
+
+        # Add points to the line strip
+        for coords in positions:
+            px = (coords[0] - self.mapSize[0]//2) / self.mapRes
+            py = (coords[1] - self.mapSize[1]//2) / self.mapRes
+
+            point = Point()
+            point.x = float(px)
+            point.y = float(py)
+            point.z = 0.0
+            marker.points.append(point)
+
+        self.marker_sweep_pub.publish(marker)
 
 def main(args=None):
     rclpy.init(args=args)

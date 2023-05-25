@@ -82,7 +82,7 @@ class PriorityQueue:
 
 def a_star_search(map, start, goal):
     if map[start[0]][start[1]] == 2:
-        clearRadius(map, start[0], start[1], 5)
+        clearRadius(map, start[0], start[1])
 
     if map[goal[0]][goal[1]] == 2:
         clearRadius(map, goal[0], goal[1], 5)
@@ -155,6 +155,12 @@ class PathNode(Node):
             '/goal',
             self.goal_callback,
             10)
+
+        self.goal_sweep_sub = self.create_subscription(
+            Int32MultiArray,
+            '/goal_sweep',
+            self.goal_sweep_callback,
+            10)
         
         self.state_sub = self.create_subscription(
             Int32,
@@ -186,6 +192,11 @@ class PathNode(Node):
             '/path',
             10)
 
+        self.path_sweep_pub = self.create_publisher(
+            Int32MultiArray,
+            '/path_sweep',
+            10)
+
         #SLAM map
         self.mapPosition = None
         self.mapSize = (320,320)
@@ -214,96 +225,85 @@ class PathNode(Node):
         py = self.mapSize[1]//2 + int(round(self.position.y,5) * self.mapRes)
         self.mapPosition = (px,py)
 
+    def goal_sweep_callback(self, msg):
+        start = (msg.data[0], msg.data[1])
+        end = (msg.data[2], msg.data[3])
+
+        padded_map_sweep = pad_walls(self.map,10)
+        padded_map_sweep = np.array(padded_map_sweep)
+
+        self.search_path = a_star_search(padded_map_sweep, start, end)
+
+        if self.search_path is None or len(self.search_path) == 0:
+            self.get_logger().info("Failed to find any AStar routes! 1")
+
+            self.deleteRvizMarkers()
+
+            self.turtle_state = 1 #Wait for command state
+            stateMsg = Int32()
+            stateMsg.data = 1
+            self.state_pub.publish(stateMsg)
+        else:
+
+            path = [item for sublist in self.search_path for item in sublist]
+
+            self.turtle_state = 7 #Pathfinding state
+            stateMsg = Int32()
+            stateMsg.data = 7
+            self.state_pub.publish(stateMsg)
+
+            time.sleep(2)
+
+            msg = Int32MultiArray()
+            msg.data = path
+            self.path_sweep_pub.publish(msg)
+            self.get_logger().info("AStar path published (" + str(len(self.search_path)) + ") " + str(self.turtle_state))
+
     def goal_callback(self, msg):
-        if self.turtle_state == 4 and len(msg.data) == 4:
-            #Sweeping pathfinding
-            start = (msg.data[0], msg.data[1])
-            end = (msg.data[2], msg.data[3])
+        goals = [msg.data[i:i+2] for i in range(0, len(msg.data), 2)]
 
-            padded_map = pad_walls(self.map,8)
-            padded_map = np.array(padded_map)
+        padded_map = pad_walls(self.map,12)
+        padded_map = np.array(padded_map)
 
+        for goal in goals:
+            self.place_marker(goal)
+            self.get_logger().info("Finding path from " + str(self.mapPosition[0]) + " " + str(self.mapPosition[1]) \
+                                    + " to " + str(goal[0]) + " " + str(goal[1]))
+
+            #a_star_search
             self.search_path = a_star_search(padded_map, self.mapPosition, goal)
 
-            if self.search_path is None or len(self.search_path) == 0:
-                self.get_logger().info("Failed to find any AStar routes!")
+            if self.search_path is not None:
+                if len(self.search_path) > 1:
+                    break
 
-                self.deleteRvizMarkers()
+            
+        if self.search_path is None or len(self.search_path) == 0:
+            self.get_logger().info("Failed to find any AStar routes! 6")
 
-                self.turtle_state = 1 #Wait for command state
-                stateMsg = Int32()
-                stateMsg.data = 1
-                self.state_pub.publish(stateMsg)
-            else:
-                print("PATH: ", self.search_path[0], self.search_path[-1])
+            self.deleteRvizMarkers()
 
-                path = [item for sublist in self.search_path for item in sublist]
+            self.turtle_state = 6 #Sweeper state
+            stateMsg = Int32()
+            stateMsg.data = 6
+            self.state_pub.publish(stateMsg)
+        else:
+            
+            path = [item for sublist in self.search_path for item in sublist]
 
-                self.turtle_state = 6 #Pathfinding state
-                stateMsg = Int32()
-                stateMsg.data = 6
-                self.state_pub.publish(stateMsg)
+            self.turtle_state = 5 #Pathfinding state
+            stateMsg = Int32()
+            stateMsg.data = 5
+            self.state_pub.publish(stateMsg)
 
-                time.sleep(1)
+            self.place_markers(self.search_path)
 
-                msg = Int32MultiArray()
-                msg.data = path
-                self.path_pub.publish(msg)
-                self.get_logger().info("AStar path published (" + str(len(self.search_path)) + ")")
+            time.sleep(2)
 
-
-        elif self.turtle_state == 4:
-            goals = [msg.data[i:i+2] for i in range(0, len(msg.data), 2)]
-
-            padded_map = pad_walls(self.map,10)
-            padded_map = np.array(padded_map)
-
-            for goal in goals:
-                self.place_marker(goal)
-                self.get_logger().info("Finding path from " + str(self.mapPosition[0]) + " " + str(self.mapPosition[1]) \
-                                       + " to " + str(goal[0]) + " " + str(goal[1]))
-
-                #a_star_search
-                self.search_path = a_star_search(padded_map, self.mapPosition, goal)
-
-                if self.search_path is not None:
-                    if len(self.search_path) > 1:
-                        break
-
-                
-            if self.search_path is None or len(self.search_path) == 0:
-                self.get_logger().info("Failed to find any AStar routes!")
-                with open("/home/chloe/turtlebot3_ws/src/turtlebot3_controller/map.txt","w") as file:
-                    for x in range(len(self.map)):
-                        for y in range(len(self.map[0])):
-                            file.write(str(self.map[x][y]) + " ")
-                        file.write("\n")
-                self.get_logger().info("Done saving map")
-
-                self.deleteRvizMarkers()
-
-                self.turtle_state = 1 #Wait for command state
-                stateMsg = Int32()
-                stateMsg.data = 1
-                self.state_pub.publish(stateMsg)
-            else:
-                print("PATH: ", self.search_path[0], self.search_path[-1])
-                
-                path = [item for sublist in self.search_path for item in sublist]
-
-                self.turtle_state = 5 #Pathfinding state
-                stateMsg = Int32()
-                stateMsg.data = 5
-                self.state_pub.publish(stateMsg)
-
-                self.place_markers(self.search_path)
-
-                time.sleep(1)
-
-                msg = Int32MultiArray()
-                msg.data = path
-                self.path_pub.publish(msg)
-                self.get_logger().info("AStar path published (" + str(len(self.search_path)) + ")")
+            msg = Int32MultiArray()
+            msg.data = path
+            self.path_pub.publish(msg)
+            self.get_logger().info("AStar path published (" + str(len(self.search_path)) + ") " + str(self.turtle_state))
 
     def map_data_callback(self, msg):
         self.mapLimits = DirLimit(msg.data[0],msg.data[1],msg.data[2],msg.data[3])
